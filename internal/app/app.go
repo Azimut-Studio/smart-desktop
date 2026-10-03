@@ -10,8 +10,9 @@ import (
 )
 
 type Desktop interface {
+	Snapshot() (model.DesktopSnapshot, error)
 	Icons() ([]model.Icon, error)
-	Position([]model.Icon) error
+	Position([]model.Icon, *bool) error
 }
 type Display interface {
 	Monitors() ([]model.Monitor, error)
@@ -31,28 +32,35 @@ func (r Report) String() string {
 }
 
 func (a *App) Capture(kind string) (model.Layout, error) {
+	l, _, err := a.capture(kind)
+	return l, err
+}
+
+func (a *App) capture(kind string) (model.Layout, model.DesktopOptions, error) {
 	var l model.Layout
+	var options model.DesktopOptions
 	before, err := a.Display.Monitors()
 	if err != nil {
-		return l, err
+		return l, options, err
 	}
-	icons, err := a.Desktop.Icons()
+	snapshot, err := a.Desktop.Snapshot()
 	if err != nil {
-		return l, err
+		return l, options, err
 	}
+	options = snapshot.Options
 	after, err := a.Display.Monitors()
 	if err != nil {
-		return l, err
+		return l, options, err
 	}
 	if !model.Compatible(before, after) {
-		return l, errors.New("configuration d'affichage modifiée pendant la capture ; réessayez")
+		return l, options, errors.New("configuration d'affichage modifiée pendant la capture ; réessayez")
 	}
 	id, err := model.NewID()
 	if err != nil {
-		return l, err
+		return l, options, err
 	}
-	l = model.Layout{Version: model.Version, ID: id, Kind: kind, CapturedAt: a.Now().UTC(), Monitors: before, Icons: icons}
-	return l, l.Validate()
+	l = model.Layout{Version: model.Version, ID: id, Kind: kind, CapturedAt: a.Now().UTC(), Monitors: before, Icons: snapshot.Icons, SnapToGrid: &snapshot.Options.SnapToGrid}
+	return l, options, l.Validate()
 }
 
 func (a *App) Save() (model.Layout, error) {
@@ -69,12 +77,15 @@ func (a *App) Restore(id string) (Report, error) {
 	if err != nil {
 		return r, err
 	}
-	current, err := a.Capture("safety")
+	current, options, err := a.capture("safety")
 	if err != nil {
 		return r, err
 	}
 	if !model.Compatible(target.Monitors, current.Monitors) {
 		return r, fmt.Errorf("restauration refusée : écrans, géométrie, écran principal, orientation ou DPI différents.\nSauvegarde : %s\nActuellement : %s", model.DisplaySummary(target.Monitors), model.DisplaySummary(current.Monitors))
+	}
+	if err = options.CheckPosition(target.SnapToGrid); err != nil {
+		return r, err
 	}
 	if err = a.Store.Save(current); err != nil {
 		return r, fmt.Errorf("sauvegarde de sécurité impossible : %w", err)
@@ -98,7 +109,7 @@ func (a *App) Restore(id string) (Report, error) {
 			r.New++
 		}
 	}
-	positionErr := a.Desktop.Position(positions)
+	positionErr := a.Desktop.Position(positions, target.SnapToGrid)
 	after, err := a.Desktop.Icons()
 	if err != nil {
 		return r, errors.Join(positionErr, fmt.Errorf("vérification impossible : %w", err))

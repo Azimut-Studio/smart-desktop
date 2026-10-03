@@ -5,6 +5,7 @@ package ui
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -13,6 +14,22 @@ import (
 	"github.com/Azimut-Studio/smart-desktop/internal/model"
 	"github.com/Azimut-Studio/smart-desktop/internal/storage"
 )
+
+func TestGridDescription(t *testing.T) {
+	on, off := true, false
+	for _, tc := range []struct {
+		grid *bool
+		want string
+	}{
+		{nil, "état non enregistré"},
+		{&off, "désactivé ; restauration avec grille désactivée uniquement"},
+		{&on, "activé ; restauration autorisée avec ou sans grille"},
+	} {
+		if text := gridDescription(tc.grid); !strings.Contains(text, tc.want) {
+			t.Fatal(text)
+		}
+	}
+}
 
 func TestNativeABISizes(t *testing.T) {
 	if unsafe.Sizeof(windowClass{}) != 80 {

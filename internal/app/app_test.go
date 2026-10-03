@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,13 +17,28 @@ type fakeDesktop struct {
 	readErr, positionErr error
 	calls                int
 	ignore               bool
+	options              model.DesktopOptions
+	savedGrid            *bool
+	beforePosition       func()
+}
+
+func (d *fakeDesktop) Snapshot() (model.DesktopSnapshot, error) {
+	icons, err := d.Icons()
+	return model.DesktopSnapshot{Icons: icons, Options: d.options}, err
 }
 
 func (d *fakeDesktop) Icons() ([]model.Icon, error) {
 	return append([]model.Icon(nil), d.icons...), d.readErr
 }
-func (d *fakeDesktop) Position(want []model.Icon) error {
+func (d *fakeDesktop) Position(want []model.Icon, savedGrid *bool) error {
 	d.calls++
+	d.savedGrid = savedGrid
+	if d.beforePosition != nil {
+		d.beforePosition()
+	}
+	if err := d.options.CheckPosition(savedGrid); err != nil {
+		return err
+	}
 	if !d.ignore {
 		for i := range d.icons {
 			for _, p := range want {
@@ -134,6 +150,7 @@ func TestPartialRestoreIsNotSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	d.icons[0].Position.X = 100
 	d.ignore = true
 	r, err := a.Restore(l.ID)
@@ -143,5 +160,89 @@ func TestPartialRestoreIsNotSuccess(t *testing.T) {
 	d.positionErr = errors.New("Shell rejected operation")
 	if _, err := a.Restore(l.ID); err == nil {
 		t.Fatal("HRESULT hidden")
+	}
+}
+
+func TestRestoreGridMatrix(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		for _, grid := range []bool{false, true} {
+			for _, state := range []string{"unknown", "off", "on"} {
+				t.Run(fmt.Sprintf("auto=%t/grid=%t/saved=%s", auto, grid, state), func(t *testing.T) {
+					a, d, _ := fixture(t)
+					l, err := a.Save()
+					if err != nil {
+						t.Fatal(err)
+					}
+					l.SnapToGrid = nil
+					if state != "unknown" {
+						saved := state == "on"
+						l.SnapToGrid = &saved
+					}
+					if err := a.Store.Save(l); err != nil {
+						t.Fatal(err)
+					}
+					d.options = model.DesktopOptions{AutoArrange: auto, SnapToGrid: grid}
+					d.icons[0].Position.X++
+					allowed := !auto && (!grid || state == "on")
+					r, err := a.Restore(l.ID)
+					if (err == nil) != allowed {
+						t.Fatal(r, err)
+					}
+					if !allowed {
+						if d.calls != 0 || d.icons[0].Position.X != l.Icons[0].Position.X+1 {
+							t.Fatal("blocked restore moved icons")
+						}
+						return
+					}
+					if r.Restored != 2 || d.calls != 1 {
+						t.Fatal(r, d.calls)
+					}
+					if (d.savedGrid == nil) != (l.SnapToGrid == nil) || (d.savedGrid != nil && *d.savedGrid != *l.SnapToGrid) {
+						t.Fatal("target grid provenance not forwarded")
+					}
+					layouts, err := a.Store.List()
+					if err != nil || len(layouts) != 2 || layouts[0].SnapToGrid == nil || *layouts[0].SnapToGrid != grid {
+						t.Fatal("safety grid not captured", layouts, err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCaptureGridAndLateChanges(t *testing.T) {
+	for _, grid := range []bool{false, true} {
+		a, d, _ := fixture(t)
+		d.options.SnapToGrid = grid
+		for _, kind := range []string{"manual", "safety", "checkpoint"} {
+			l, err := a.Capture(kind)
+			if err != nil || l.SnapToGrid == nil || *l.SnapToGrid != grid {
+				t.Fatal(l, err)
+			}
+		}
+	}
+	for _, change := range []model.DesktopOptions{{SnapToGrid: true}, {AutoArrange: true}} {
+		a, d, _ := fixture(t)
+		l, err := a.Save()
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.icons[0].Position.X++
+		d.beforePosition = func() { d.options = change }
+		r, err := a.Restore(l.ID)
+		if err == nil || r.Failed != 1 || d.icons[0].Position.X != l.Icons[0].Position.X+1 {
+			t.Fatal("late option change accepted", r, err)
+		}
+	}
+	a, d, _ := fixture(t)
+	d.options.SnapToGrid = true
+	l, err := a.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.icons[0].Position.X++
+	d.ignore = true
+	if r, err := a.Restore(l.ID); err == nil || r.Failed != 1 {
+		t.Fatal("grid correction accepted as success", r, err)
 	}
 }

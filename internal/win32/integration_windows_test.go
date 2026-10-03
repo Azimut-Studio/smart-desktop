@@ -25,21 +25,22 @@ func TestDesktopReadOnlyIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	icons, err := (Desktop{}).Icons()
+	snapshot, err := (Desktop{}).Snapshot()
 	if err != nil {
 		t.Fatal(err)
 	}
+	icons := snapshot.Icons
 	id, err := model.NewID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("Read %d monitors and %d icons via Shell; no positions changed", len(ms), len(icons))
+	t.Logf("Read %d monitors and %d icons via Shell; grid=%t auto-arrange=%t; no positions changed", len(ms), len(icons), snapshot.Options.SnapToGrid, snapshot.Options.AutoArrange)
 	for _, icon := range icons {
 		if icon.Identity == "" {
 			t.Fatal("missing identity")
 		}
 	}
-	l := model.Layout{Version: model.Version, ID: id, Kind: "manual", CapturedAt: time.Now().UTC(), Monitors: ms, Icons: icons}
+	l := model.Layout{Version: model.Version, ID: id, Kind: "manual", CapturedAt: time.Now().UTC(), Monitors: ms, Icons: icons, SnapToGrid: &snapshot.Options.SnapToGrid}
 	if err := l.Validate(); err != nil {
 		t.Fatal(err)
 	}

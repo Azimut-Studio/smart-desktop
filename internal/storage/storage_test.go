@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,38 @@ import (
 
 	"github.com/Azimut-Studio/smart-desktop/internal/model"
 )
+
+func TestLayoutGridCompatibility(t *testing.T) {
+	for _, state := range []string{"unknown", "off", "on"} {
+		t.Run(state, func(t *testing.T) {
+			s := newStore(t)
+			l := layout(t, "manual", time.Now().UTC())
+			if state != "unknown" {
+				grid := state == "on"
+				l.SnapToGrid = &grid
+			}
+			if err := s.Save(l); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.Load(l.ID)
+			if err != nil || (got.SnapToGrid == nil) != (l.SnapToGrid == nil) || (got.SnapToGrid != nil && *got.SnapToGrid != *l.SnapToGrid) {
+				t.Fatal(got, err)
+			}
+			raw, err := os.ReadFile(filepath.Join(s.Root, "backups", l.ID+".json"))
+			if err != nil || bytes.Contains(raw, []byte(`"snap_to_grid"`)) != (state != "unknown") {
+				t.Fatal(string(raw), err)
+			}
+			l.Kind = "checkpoint"
+			if err := s.SaveCheckpoint(l); err != nil {
+				t.Fatal(err)
+			}
+			cp, err := s.Checkpoint()
+			if err != nil || (cp.SnapToGrid == nil) != (l.SnapToGrid == nil) || (cp.SnapToGrid != nil && *cp.SnapToGrid != *l.SnapToGrid) {
+				t.Fatal(cp, err)
+			}
+		})
+	}
+}
 
 func layout(t *testing.T, kind string, at time.Time) model.Layout {
 	t.Helper()

@@ -20,6 +20,8 @@ func TestArchiveOldCheckpointOnceThenStabilize(t *testing.T) {
 	now := time.Now().UTC()
 	old := cp(t, 1920, now)
 	next := cp(t, 1280, now.Add(time.Second))
+	oldGrid, nextGrid := true, false
+	old.SnapToGrid, next.SnapToGrid = &oldGrid, &nextGrid
 	o := Observer{Checkpoint: &old}
 	var archives []model.Layout
 	captures := 0
@@ -34,6 +36,9 @@ func TestArchiveOldCheckpointOnceThenStabilize(t *testing.T) {
 	if len(archives) != 1 || captures != 0 {
 		t.Fatal(len(archives), captures)
 	}
+	if archives[0].SnapToGrid == nil || !*archives[0].SnapToGrid {
+		t.Fatal("archive lost original grid state")
+	}
 	if archives[0].Monitors[0].Width != 1920 || !archives[0].CapturedAt.Equal(old.CapturedAt) || archives[0].Kind != "automatic" || archives[0].DetectedAt == nil || archives[0].ID == old.ID {
 		t.Fatal(archives[0])
 	}
@@ -42,6 +47,9 @@ func TestArchiveOldCheckpointOnceThenStabilize(t *testing.T) {
 	}
 	if captures != 1 || o.Checkpoint.Monitors[0].Width != 1280 {
 		t.Fatal(captures, o)
+	}
+	if o.Checkpoint.SnapToGrid == nil || *o.Checkpoint.SnapToGrid {
+		t.Fatal("new checkpoint grid not preserved")
 	}
 }
 func TestFailuresPreserveCheckpoint(t *testing.T) {

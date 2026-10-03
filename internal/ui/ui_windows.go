@@ -574,6 +574,7 @@ func (w *Window) details() {
 	text := "Sélectionnez une sauvegarde pour consulter sa configuration."
 	if l != nil {
 		var parts []string
+		parts = append(parts, gridDescription(l.SnapToGrid))
 		for _, m := range l.Monitors {
 			parts = append(parts, fmt.Sprintf("%s : %dx%d, origine (%d,%d), DPI %d/%d, orientation %d, principal %t", m.Name, m.Width, m.Height, m.Left, m.Top, m.DPIX, m.DPIY, m.Orientation, m.Primary))
 			for _, target := range m.Targets {
@@ -586,6 +587,16 @@ func (w *Window) details() {
 		text = strings.Join(parts, "\r\n")
 	}
 	call("SetWindowTextW", w.controls[201], str(text))
+}
+
+func gridDescription(savedGrid *bool) string {
+	if savedGrid == nil {
+		return "Alignement sur la grille : état non enregistré ; restauration avec grille désactivée uniquement."
+	}
+	if *savedGrid {
+		return "Alignement sur la grille à la capture : activé ; restauration autorisée avec ou sans grille."
+	}
+	return "Alignement sur la grille à la capture : désactivé ; restauration avec grille désactivée uniquement."
 }
 
 func (w *Window) operation(job func(*app.Worker) (string, error)) {
@@ -661,7 +672,7 @@ func (w *Window) command(id int) {
 			return
 		}
 		id := l.ID
-		if !w.confirm("Restaurer cette disposition ?\n" + label(*l) + "\nUne sauvegarde de sécurité sera créée. Désactivez l'arrangement automatique et l'alignement sur la grille sur le bureau.") {
+		if !w.confirm("Restaurer cette disposition ?\n" + label(*l) + "\n" + gridDescription(l.SnapToGrid) + "\nUne sauvegarde de sécurité sera créée avant tout déplacement. Désactivez « Réorganiser automatiquement les icônes » sur le bureau. Les réglages Windows ne seront pas modifiés ; les positions finales seront vérifiées.") {
 			return
 		}
 		w.operation(func(a *app.Worker) (string, error) { r, err := a.App.Restore(id); return r.String(), err })

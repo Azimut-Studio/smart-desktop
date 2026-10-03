@@ -26,7 +26,19 @@ Une restauration crée d'abord une **sauvegarde de sécurité** de l'état actue
 
 La configuration actuelle doit correspondre à la sauvegarde : identités des écrans, géométrie du bureau, écran principal, orientation, DPI et résolutions des cibles physiques, y compris en duplication. L'application **ne change jamais la résolution**. En cas de refus, rétablir la configuration d'affichage initiale puis réessayer.
 
-Pour une restitution exacte, désactiver **Réorganiser automatiquement les icônes** et **Aligner les icônes sur la grille** dans le menu **Affichage** du bureau Windows. Si l'une de ces options est active, l'application refuse de déplacer les icônes et explique pourquoi, sans modifier ces réglages.
+**Réorganiser automatiquement les icônes** doit toujours être désactivé dans le menu **Affichage** du bureau Windows avant une restauration.
+
+L'état de **Aligner les icônes sur la grille** est enregistré avec les positions dans chaque nouvelle sauvegarde, y compris les sauvegardes de sécurité et les checkpoints utilisés pour l'archivage automatique. Les détails d'une sauvegarde indiquent cet état. Si les réglages de disposition changent pendant la capture, celle-ci échoue explicitement.
+
+| Grille actuelle | Grille lors de la sauvegarde | Restauration |
+| --- | --- | --- |
+| Désactivée | Activée, désactivée ou inconnue | Autorisée |
+| Activée | Activée | Autorisée, avec vérification exacte des positions |
+| Activée | Désactivée ou inconnue | Refusée : désactiver la grille puis réessayer |
+
+L'application **ne modifie jamais ces réglages Windows**. Elle les contrôle de nouveau avant les déplacements et signale les changements observés pendant la restauration. L'état enregistré autorise une tentative, pas une garantie : une taille d'icônes ou un espacement différent, une collision ou le comportement d'Explorer peuvent empêcher la restitution exacte. Les coordonnées ne sont pas arrondies pour masquer un échec ; toute différence détectée est signalée dans le bilan.
+
+Les anciennes sauvegardes sans champ `snap_to_grid` restent lisibles, avec un état de grille inconnu ; elles nécessitent une grille désactivée pour être restaurées. Le format reste en version 1, avec ce champ optionnel. En revanche, les anciens exécutables, qui refusent les champs JSON inconnus, ne peuvent pas lire les nouvelles sauvegardes contenant ce champ.
 
 Le bureau est lu via les interfaces COM documentées du Shell Windows (`IFolderView` / `IFolderView2`). `desktop.ini` sert à personnaliser les dossiers et n'est pas utilisé pour les positions.
 
@@ -114,7 +126,7 @@ go test .\internal\win32 .\internal\ui -run 'TestDesktopReadOnlyIntegration|Test
 Remove-Item Env:\SMART_DESKTOP_INTEGRATION
 ```
 
-Un test distinct déplace temporairement **une seule icône**, vérifie le déplacement puis la remise en place, et conserve une sauvegarde de sécurité locale. Ne l'exécuter qu'avec l'accord de l'utilisateur du bureau. Il est ignoré si l'arrangement automatique ou l'alignement sur grille est actif ; il ne change pas ces réglages :
+Un test distinct déplace temporairement **une seule icône**, vérifie le déplacement puis la remise en place et l'absence de changement des autres positions et réglages, et conserve une sauvegarde de sécurité locale. Ne l'exécuter qu'avec l'accord de l'utilisateur du bureau. Il est ignoré si la réorganisation automatique est active ; il ne change pas les réglages. Avec la grille active, il choisit une destination libre en utilisant l'espacement du Shell, uniquement sur un écran principal à origine (0,0) ; sinon, si aucune destination sûre n'est disponible, il est ignoré sans déplacement :
 
 ```powershell
 $env:SMART_DESKTOP_ALLOW_MOVE = '1'
@@ -122,7 +134,7 @@ go test .\internal\win32 -run TestDesktopRestoreConsentedIntegration -v -count=1
 Remove-Item Env:\SMART_DESKTOP_ALLOW_MOVE
 ```
 
-Les tests unitaires couvrent les schemas, identités, tris, paramètres, écritures, fichiers corrompus, rétention, compatibilité multi-écrans, sauvegardes de sécurité, restaurations partielles et transitions simulées d'affichage.
+Les tests unitaires couvrent les schemas, identités, tris, paramètres, écritures, fichiers corrompus, rétention, compatibilité multi-écrans, sauvegardes de sécurité, restaurations partielles et transitions simulées d'affichage. Ils couvrent aussi la matrice de restauration avec grille, la compatibilité des anciennes sauvegardes, la conservation de l'état de grille dans les archives, les erreurs de lecture des réglages et les changements observés pendant la capture ou les déplacements.
 
 À vérifier aussi sur les machines cibles : Windows 10 et 11, plusieurs écrans et DPI mixtes, écran à origine négative, duplication, déconnexion/reconnexion, reprise de session, redémarrage d'Explorer, tray et démarrage réel. Les tests automatisés ne changent ni la résolution ni les inscriptions au démarrage.
 
@@ -130,9 +142,13 @@ Les tests unitaires couvrent les schemas, identités, tris, paramètres, écritu
 
 La compilation Windows x64, `go vet`, les tests unitaires, la lecture réelle du Shell, la création de la fenêtre native et un essai du binaire compilé ont été réalisés. L'essai du binaire a vérifié les ressources DPI, l'agent masqué et réactif, l'ouverture de la fenêtre par une seconde instance et l'arrêt propre.
 
-L'essai de déplacement/restauration réel a été ignoré parce que les options d'arrangement ou d'alignement du bureau étaient actives. Aucun réglage du bureau n'a été changé. Les restaurations complètes et partielles sont vérifiées par doubles dans les tests unitaires, mais restent à confirmer sur un bureau réel configuré pour le positionnement libre.
+Lors de la validation initiale, l'essai de déplacement/restauration réel a été ignoré parce que les options d'arrangement ou d'alignement du bureau étaient actives. Aucun réglage du bureau n'a été changé. Les restaurations complètes et partielles sont vérifiées par doubles dans les tests unitaires. La restauration conditionnelle avec grille active nécessite également le test consenti sur un bureau réel compatible ; les tests unitaires seuls ne garantissent pas le comportement d'Explorer.
 
 Le détecteur `go test -race` a aussi été tenté : ThreadSanitizer a échoué à allouer sa mémoire avant l'exécution des tests dans l'environnement de validation. L'analyse de races n'est donc pas validée. Les transitions réelles multi-écrans et les inscriptions au démarrage restent des vérifications manuelles.
+
+### Validation de la restauration conditionnelle avec grille
+
+La compilation Windows x64, `go vet`, les tests unitaires et les tests d'intégration en lecture seule du Shell et de la fenêtre native ont réussi. Le test de déplacement consenti a également réussi sur un bureau à un écran avec la grille active et la réorganisation automatique désactivée : déplacement d'une icône, restitution exacte de sa position initiale, vérification des autres positions et conservation des réglages. Une sauvegarde de sécurité locale a été conservée. Cela ne remplace pas les validations sur d'autres configurations Windows, tailles d'icônes ou espacements.
 
 ## Périmètre
 

@@ -97,12 +97,29 @@ func TestIDs(t *testing.T) {
 	if err != nil || !ValidID(id) {
 		t.Fatal(id, err)
 	}
+
 	for _, id := range []string{"..\\settings", strings.Repeat("A", 32), "", strings.Repeat("z", 32)} {
 		if ValidID(id) {
 			t.Fatal(id)
 		}
 	}
 }
+
+func TestDesktopPositionPolicy(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		for _, grid := range []bool{false, true} {
+			for _, saved := range []*bool{nil, boolValue(false), boolValue(true)} {
+				options := DesktopOptions{AutoArrange: auto, SnapToGrid: grid}
+				wantAllowed := !auto && (!grid || (saved != nil && *saved))
+				if err := options.CheckPosition(saved); (err == nil) != wantAllowed {
+					t.Fatalf("auto=%t grid=%t saved=%v: %v", auto, grid, saved, err)
+				}
+			}
+		}
+	}
+}
+
+func boolValue(value bool) *bool { return &value }
 
 func TestPhysicalTargetsAndClones(t *testing.T) {
 	a := testMonitors()

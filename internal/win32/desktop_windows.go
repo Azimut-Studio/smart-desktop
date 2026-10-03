@@ -192,15 +192,21 @@ func freeEntries(es []desktopEntry) {
 
 type Desktop struct{}
 
-func (Desktop) Icons() ([]model.Icon, error) {
-	if err := Interactive(); err != nil {
-		return nil, err
+const (
+	fwfAutoArrange = 0x1
+	fwfSnapToGrid  = 0x4
+)
+
+func desktopOptions(view *comObject) (model.DesktopOptions, error) {
+	var flags uint32
+	hr := view.call(25, unsafe.Pointer(&flags))
+	if err := HResult("GetCurrentFolderFlags", hr); err != nil {
+		return model.DesktopOptions{}, err
 	}
-	view, err := desktopView()
-	if err != nil {
-		return nil, err
-	}
-	defer view.release()
+	return model.DesktopOptions{AutoArrange: flags&fwfAutoArrange != 0, SnapToGrid: flags&fwfSnapToGrid != 0}, nil
+}
+
+func desktopIcons(view *comObject) ([]model.Icon, error) {
 	es, err := entries(view)
 	if err != nil {
 		return nil, err
@@ -213,7 +219,53 @@ func (Desktop) Icons() ([]model.Icon, error) {
 	return icons, nil
 }
 
-func (Desktop) Position(icons []model.Icon) error {
+func captureDesktop(readOptions func() (model.DesktopOptions, error), readIcons func() ([]model.Icon, error)) (model.DesktopSnapshot, error) {
+	before, err := readOptions()
+	if err != nil {
+		return model.DesktopSnapshot{}, err
+	}
+	icons, err := readIcons()
+	if err != nil {
+		return model.DesktopSnapshot{}, err
+	}
+	after, err := readOptions()
+	if err != nil {
+		return model.DesktopSnapshot{}, err
+	}
+	if before != after {
+		return model.DesktopSnapshot{}, errors.New("réglages de disposition du bureau modifiés pendant la capture ; réessayez")
+	}
+	return model.DesktopSnapshot{Icons: icons, Options: before}, nil
+}
+
+func (Desktop) Snapshot() (model.DesktopSnapshot, error) {
+	if err := Interactive(); err != nil {
+		return model.DesktopSnapshot{}, err
+	}
+	view, err := desktopView()
+	if err != nil {
+		return model.DesktopSnapshot{}, err
+	}
+	defer view.release()
+	return captureDesktop(
+		func() (model.DesktopOptions, error) { return desktopOptions(view) },
+		func() ([]model.Icon, error) { return desktopIcons(view) },
+	)
+}
+
+func (Desktop) Icons() ([]model.Icon, error) {
+	if err := Interactive(); err != nil {
+		return nil, err
+	}
+	view, err := desktopView()
+	if err != nil {
+		return nil, err
+	}
+	defer view.release()
+	return desktopIcons(view)
+}
+
+func (Desktop) Position(icons []model.Icon, savedGrid *bool) error {
 	if err := Interactive(); err != nil {
 		return err
 	}
@@ -222,13 +274,12 @@ func (Desktop) Position(icons []model.Icon) error {
 		return err
 	}
 	defer view.release()
-	var flags uint32
-	hr := view.call(25, unsafe.Pointer(&flags))
-	if err = HResult("GetCurrentFolderFlags", hr); err != nil {
+	options, err := desktopOptions(view)
+	if err != nil {
 		return err
 	}
-	if flags&(0x1|0x4) != 0 {
-		return errors.New("désactivez « Réorganiser automatiquement les icônes » et « Aligner les icônes sur la grille » dans le menu Affichage du bureau, puis réessayez")
+	if err = options.CheckPosition(savedGrid); err != nil {
+		return err
 	}
 	es, err := entries(view)
 	if err != nil {
@@ -239,20 +290,44 @@ func (Desktop) Position(icons []model.Icon) error {
 	for _, e := range es {
 		byID[e.icon.Identity] = e.pidl
 	}
+	return positionDesktop(icons, savedGrid, options,
+		func() (model.DesktopOptions, error) { return desktopOptions(view) },
+		func(icon model.Icon) error {
+			pidl, ok := byID[icon.Identity]
+			if !ok {
+				return fmt.Errorf("icône disparue : %s", icon.Name)
+			}
+			p := icon.Position
+			hr := view.call(16, 1, unsafe.Pointer(&pidl), unsafe.Pointer(&p), 0x80)
+			runtime.KeepAlive(&pidl)
+			runtime.KeepAlive(&p)
+			return HResult("SelectAndPositionItems "+icon.Name, hr)
+		},
+	)
+}
+
+func positionDesktop(icons []model.Icon, savedGrid *bool, options model.DesktopOptions, readOptions func() (model.DesktopOptions, error), move func(model.Icon) error) error {
+	if err := options.CheckPosition(savedGrid); err != nil {
+		return err
+	}
 	var failures []error
 	for _, icon := range icons {
-		pidl, ok := byID[icon.Identity]
-		if !ok {
-			failures = append(failures, fmt.Errorf("icône disparue : %s", icon.Name))
-			continue
+		currentOptions, readErr := readOptions()
+		if readErr != nil {
+			return errors.Join(errors.Join(failures...), readErr)
 		}
-		p := icon.Position
-		hr = view.call(16, 1, unsafe.Pointer(&pidl), unsafe.Pointer(&p), 0x80)
-		runtime.KeepAlive(&pidl)
-		runtime.KeepAlive(&p)
-		if err = HResult("SelectAndPositionItems "+icon.Name, hr); err != nil {
+		if currentOptions != options {
+			return errors.Join(errors.Join(failures...), errors.New("réglages de disposition du bureau modifiés pendant la restauration ; opération interrompue"))
+		}
+		if err := move(icon); err != nil {
 			failures = append(failures, err)
 		}
+	}
+	after, readErr := readOptions()
+	if readErr != nil {
+		failures = append(failures, readErr)
+	} else if after != options {
+		failures = append(failures, errors.New("réglages de disposition du bureau modifiés pendant la restauration"))
 	}
 	return errors.Join(failures...)
 }

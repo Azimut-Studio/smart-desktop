@@ -53,6 +53,30 @@ type Layout struct {
 	Kind       string     `json:"kind"`
 	Monitors   []Monitor  `json:"monitors"`
 	Icons      []Icon     `json:"icons"`
+	SnapToGrid *bool      `json:"snap_to_grid,omitempty"`
+}
+
+type DesktopOptions struct {
+	SnapToGrid  bool
+	AutoArrange bool
+}
+
+type DesktopSnapshot struct {
+	Icons   []Icon
+	Options DesktopOptions
+}
+
+func (o DesktopOptions) CheckPosition(savedGrid *bool) error {
+	if o.AutoArrange {
+		return errors.New("désactivez « Réorganiser automatiquement les icônes » dans le menu Affichage du bureau, puis réessayez")
+	}
+	if o.SnapToGrid && (savedGrid == nil || !*savedGrid) {
+		if savedGrid == nil {
+			return errors.New("état de la grille non enregistré dans cette sauvegarde : désactivez « Aligner les icônes sur la grille » sur le bureau, puis réessayez")
+		}
+		return errors.New("cette sauvegarde a été capturée sans alignement sur la grille : désactivez « Aligner les icônes sur la grille » sur le bureau, puis réessayez")
+	}
+	return nil
 }
 
 type Settings struct {
