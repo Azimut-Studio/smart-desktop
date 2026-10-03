@@ -36,6 +36,8 @@ const (
 	idAutomatic  = 303
 	idInterval   = 304
 	idLimit      = 305
+
+	appIconResourceID = 2 // rsrc reserves ID 1 for the manifest before assigning the icon group.
 )
 
 type windowClass struct {
@@ -151,12 +153,9 @@ func Run(worker *app.Worker, settings model.Settings, className string, backgrou
 	current = w
 	defer func() { current = nil }()
 	w.instance, _, _ = win32.Kernel32.NewProc("GetModuleHandleW").Call(0)
-	w.icon = call("LoadIconW", w.instance, 1)
+	w.icon = call("LoadIconW", w.instance, appIconResourceID)
 	if w.icon == 0 {
-		w.icon = call("LoadIconW", 0, 32512)
-	}
-	if w.icon == 0 {
-		return errors.New("icône de l'application indisponible")
+		return fmt.Errorf("ressource d'icône %d de l'application indisponible", appIconResourceID)
 	}
 	class := windowClass{Size: uint32(unsafe.Sizeof(windowClass{})), Proc: callback,
 		Instance: w.instance, Icon: w.icon, SmallIcon: w.icon, Cursor: call("LoadCursorW", 0, 32512),
@@ -178,6 +177,8 @@ func Run(worker *app.Worker, settings model.Settings, className string, backgrou
 	if err := win32.CheckBOOL("CreateWindowExW", w.hwnd, e); err != nil {
 		return err
 	}
+	call("SendMessageW", w.hwnd, 0x80, 1, w.icon)
+	call("SendMessageW", w.hwnd, 0x80, 0, w.icon)
 	if w.createErr != nil {
 		call("DestroyWindow", w.hwnd)
 		return w.createErr
