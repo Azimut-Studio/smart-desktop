@@ -1,0 +1,7 @@
+# Files
+PROMPTS.md
+
+# Generated application resources and binaries
+dist/
+assets/smart-desktop.ico
+cmd/smart-desktop/*.syso
