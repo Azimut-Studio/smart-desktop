@@ -29,6 +29,7 @@ const (
 	idApply      = 104
 	idOpen       = 105
 	idQuit       = 106
+	idAbout      = 107
 	idHistory    = 200
 	idTray       = 300
 	idStartup    = 301
@@ -650,6 +651,8 @@ func (w *Window) command(id int) {
 	switch id {
 	case idOpen:
 		w.open()
+	case idAbout:
+		w.message("Version 1.0\r\n© 2026 - Guillaume VALENTIN", false)
 	case idQuit:
 		if w.busy {
 			w.message("Attendez la fin de l'opération.", true)
@@ -771,6 +774,7 @@ func (w *Window) rebuildMenu() {
 	appendMenu(file, 0, idQuit, "Quitter")
 	appendMenu(m, 0x10, file, "Application")
 	appendMenu(m, 0x10, w.historyMenu(), "Sauvegardes (50 dernières)")
+	appendMenu(m, 0, idAbout, "À propos")
 	if w.menuErr != nil {
 		call("DestroyMenu", m)
 		w.createErr = errors.Join(w.createErr, w.menuErr)

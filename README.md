@@ -22,6 +22,8 @@ Dans VS Code, la tâche **Build Smart Desktop** exécute ce même script. Préf�
 3. Retrouver une disposition dans la liste ou le menu **Sauvegardes**, avec date locale, résolutions, DPI, origine et nombre d'icônes.
 4. Sélectionner une disposition, puis **Restaurer**. Le menu propose les 50 dispositions les plus récentes ; la liste contient l'historique complet.
 
+Le menu **À propos**, à côté d'**Application** et de **Sauvegardes**, affiche **Version 1.0** et **© Azimut Studio** dans une boîte de dialogue fermée par **OK**.
+
 Une restauration crée d'abord une **sauvegarde de sécurité** de l'état actuel. Les icônes sont reconnues par leur identité Shell, pas seulement leur libellé ni leur index. Les icônes disparues ou renommées ne sont pas recréées ; les nouvelles ne sont pas déplacées. Un bilan vérifie les positions obtenues et signale les résultats partiels.
 
 La configuration actuelle doit correspondre à la sauvegarde : identités des écrans, géométrie du bureau, écran principal, orientation, DPI et résolutions des cibles physiques, y compris en duplication. L'application **ne change jamais la résolution**. En cas de refus, rétablir la configuration d'affichage initiale puis réessayer.
@@ -111,6 +113,8 @@ Un fichier invalide est signalé, pas remplacé silencieusement. En cas de param
 
 Pour arrêter et désactiver l'agent : relancer l'application, décocher le démarrage Windows, appliquer, puis cliquer **Quitter**. Les données ne sont pas supprimées.
 
+Lors d'une désinstallation avec l'installeur Inno Setup, Smart Desktop est arrêté automatiquement. La suppression de `%LOCALAPPDATA%\SmartDesktop` est proposée ; les données sont conservées par défaut.
+
 ## Tests
 
 ```powershell
@@ -122,7 +126,7 @@ Tests d'intégration sur un bureau Windows interactif, **sans déplacement d'ic�
 
 ```powershell
 $env:SMART_DESKTOP_INTEGRATION = '1'
-go test .\internal\win32 .\internal\ui -run 'TestDesktopReadOnlyIntegration|TestNativeWindowSmoke' -v -count=1 -timeout=30s
+go test .\internal\win32 .\internal\ui -run 'TestDesktopReadOnlyIntegration|TestNativeWindowSmoke|TestNativeAboutMenu' -v -count=1 -timeout=30s
 Remove-Item Env:\SMART_DESKTOP_INTEGRATION
 ```
 
@@ -152,7 +156,7 @@ La compilation Windows x64, `go vet`, les tests unitaires et les tests d'intégr
 
 ## Périmètre
 
-Pas de service système, installateur, signature numérique, cloud, import/export DesktopOK, changement de résolution ou restauration automatique. Windows ARM64 et 32 bits ne sont pas ciblés.
+Pas de service système, signature numérique, cloud, import/export DesktopOK, changement de résolution ou restauration automatique. Windows ARM64 et 32 bits ne sont pas ciblés.
 
 Références :
 

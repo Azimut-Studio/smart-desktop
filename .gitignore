@@ -1,5 +1,6 @@
 # Files
 PROMPTS.md
+*.exe
 
 # Generated application resources and binaries
 dist/

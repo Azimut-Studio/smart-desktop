@@ -5,6 +5,7 @@ package ui
 import (
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/Azimut-Studio/smart-desktop/internal/app"
 	"github.com/Azimut-Studio/smart-desktop/internal/model"
 	"github.com/Azimut-Studio/smart-desktop/internal/storage"
+	"github.com/Azimut-Studio/smart-desktop/internal/win32"
+	"golang.org/x/sys/windows"
 )
 
 func TestGridDescription(t *testing.T) {
@@ -37,6 +40,49 @@ func TestNativeABISizes(t *testing.T) {
 	}
 	if unsafe.Sizeof(notificationIcon{}) != 976 {
 		t.Fatalf("NOTIFYICONDATAW size: %d", unsafe.Sizeof(notificationIcon{}))
+	}
+}
+
+func TestNativeAboutMenu(t *testing.T) {
+	if os.Getenv("SMART_DESKTOP_INTEGRATION") != "1" {
+		t.Skip("requires a Windows desktop; hidden window, no icon positions modified")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	hwnd, _, err := invoke(win32.User32.NewProc("CreateWindowExW"), 0, str("STATIC"), str("Smart Desktop menu test"),
+		0x00cf0000, 0, 0, 320, 240, 0, 0, 0, 0)
+	if hwnd == 0 {
+		t.Fatalf("CreateWindowExW: %v", err)
+	}
+	defer call("DestroyWindow", hwnd)
+	w := &Window{hwnd: hwnd}
+	old := current
+	current = w
+	defer func() { current = old }()
+	defer func() { call("DestroyMenu", w.menu) }()
+
+	for rebuild := 0; rebuild < 2; rebuild++ {
+		w.rebuildMenu()
+		if w.createErr != nil {
+			t.Fatal(w.createErr)
+		}
+		menu := call("GetMenu", hwnd)
+		if count := call("GetMenuItemCount", menu); count != 3 {
+			t.Fatalf("menu item count: got %d, want 3", count)
+		}
+		for index, want := range []string{"Application", "Sauvegardes (50 dernières)", "À propos"} {
+			var text [128]uint16
+			call("GetMenuStringW", menu, index, unsafe.Pointer(&text[0]), len(text), 0x400)
+			if got := windows.UTF16ToString(text[:]); got != want {
+				t.Fatalf("menu item %d: got %q, want %q", index, got, want)
+			}
+		}
+		if id := call("GetMenuItemID", menu, 2); id != idAbout {
+			t.Fatalf("about command: got %d, want %d", id, idAbout)
+		}
+		if submenu := call("GetSubMenu", menu, 2); submenu != 0 {
+			t.Fatal("about must be a direct command, not a submenu")
+		}
 	}
 }
 
