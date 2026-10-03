@@ -15,6 +15,34 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "Test Smart Desktop",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\test.ps1"
+			],
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify Reproducible Build",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\verify-reproducibility.ps1"
+			],
+			"problemMatcher": [],
+			"group": "test"
 		}
 	]
 }

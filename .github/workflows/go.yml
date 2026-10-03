@@ -1,0 +1,50 @@
+name: Go vendoring and reproducibility
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build and test offline, then compare clean binaries
+        shell: powershell
+        run: .\scripts\verify-reproducibility.ps1
+
+  vendor-sync:
+    runs-on: windows-2025
+    env:
+      GOENV: 'off'
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+      GOFLAGS: '-mod=mod'
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Regenerate vendor and reject any drift
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go mod vendor
+          if ($LASTEXITCODE -ne 0) { throw 'Vendoring failed.' }
+          $changes = @(git status --porcelain --untracked-files=all -- go.mod go.sum vendor)
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to check vendoring changes.' }
+          if ($changes.Count -ne 0) {
+            $changes | Write-Host
+            throw 'Commit the regenerated go.mod, go.sum and vendor directory.'
+          }

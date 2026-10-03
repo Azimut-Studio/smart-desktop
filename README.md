@@ -4,16 +4,54 @@ Application Go native en français pour **Windows 10 (1703 ou plus récent)/11 x
 
 ## Compiler
 
-Installer **Go 1.25 ou plus récent**, puis, depuis la racine du dépôt :
+Installer exactement **Go 1.27.0** pour Windows x64, puis, depuis la racine du dépôt :
 
 ```powershell
-go mod download
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
 
-Le script génère une icône originale, les ressources Windows et le manifeste DPI, puis produit `dist\SmartDesktop.exe`. Le compilateur C n'est pas nécessaire. Les dépendances de compilation sont déclarées et versionnées dans le module Go.
+Le script génère une icône originale, les ressources Windows et le manifeste DPI, puis produit `dist\SmartDesktop.exe`. Le compilateur C n'est pas nécessaire. Toutes les dépendances Go nécessaires à l'application, aux tests et à l'outil de ressources `rsrc` sont versionnées dans `vendor/`, avec leurs licences. Aucun `go mod download` ni accès au réseau des modules n'est nécessaire pour compiler après installation du SDK.
 
 Dans VS Code, la tâche **Build Smart Desktop** exécute ce même script. Préférer ce script à `go build` seul : les ressources et le manifeste font partie du comportement DPI attendu.
+
+### Vendoring et reproductibilité
+
+`go.mod` fixe la version exacte du SDK utilisée par les scripts et la CI. Les points d'entrée officiels refusent une autre version, un dossier vendor absent ou des dépendances incohérentes, sans repli vers un téléchargement. Ils imposent `-mod=vendor`, `GOTOOLCHAIN=local`, `GOWORK=off`, `GOPROXY=off` et `GOSUMDB=off`, y compris pour `go tool rsrc`.
+
+La cible est Windows amd64, niveau `GOAMD64=v1`, sans CGO ni expérimentation Go. Les scripts ignorent la configuration persistante `go env -w` et remplacent temporairement `GOFLAGS` ; les variables qu'ils modifient sont restaurées même en cas d'erreur. `-trimpath` supprime les chemins de compilation et `-buildvcs=false` évite que la présence de Git, le commit ou l'état modifié du dépôt changent l'exécutable. Les informations VCS ne sont donc pas incorporées au binaire. `.gitattributes` fixe les fins de ligne des sources Go, des dépendances vendoriées et du manifeste afin que `core.autocrlf` ne change pas les entrées de compilation entre clones.
+
+Pour vérifier l'autonomie des dépendances et l'identité binaire :
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-reproducibility.ps1
+```
+
+La tâche VS Code **Verify Reproducible Build** exécute cette vérification. Elle contrôle d'abord les refus attendus (SDK incorrect, vendor absent ou incohérent, mode interactif) et la restauration de l'environnement via `scripts/test-build-policy.ps1`. Elle copie ensuite les sources et vendor dans deux chemins temporaires distincts, utilise des caches de compilation et de modules vides, régénère les ressources, exécute `go vet` et les tests unitaires, puis exige le même SHA-256 pour les deux exécutables. Elle vérifie que les caches de modules restent vides et nettoie ses fichiers temporaires. Les tests interactifs sont interdits dans ce parcours.
+
+La CI Windows exécute cette même vérification. Un job distinct, avec accès réseau autorisé pour la maintenance uniquement, régénère vendor et refuse toute différence, y compris les nouveaux fichiers non suivis. Les actions GitHub sont fixées par SHA et le cache de modules de `setup-go` est désactivé.
+
+Cette vérification démontre l'identité binaire de deux builds propres dans l'environnement contrôlé, pas une garantie universelle entre toutes les versions de Windows ou tous les futurs runners CI. Le SDK Go, Windows, les outils GitHub Actions et une éventuelle signature ne sont pas vendoriés. Go seul peut également être lancé manuellement avec `-mod=mod` : l'obligation s'applique aux scripts et à la CI pris en charge.
+
+### Mise à jour volontaire des dépendances
+
+Avec le SDK exact déclaré dans `go.mod`, dans une session dédiée de maintenance :
+
+```powershell
+$env:GOENV = 'off'
+$env:GOTOOLCHAIN = 'local'
+$env:GOWORK = 'off'
+$env:GOFLAGS = '-mod=mod'
+$env:GOPROXY = 'https://proxy.golang.org'
+$env:GOSUMDB = 'sum.golang.org'
+# Modifier les versions de façon explicite, par exemple via go get module@version.
+go mod vendor
+if ($LASTEXITCODE -ne 0) { throw 'Vendoring failed.' }
+git status --short --untracked-files=all -- go.mod go.sum vendor
+```
+
+La régénération peut accéder au réseau. Ne pas modifier vendor à la main et ne pas utiliser `go mod vendor -e`, qui autorise une génération malgré des erreurs. Examiner et versionner ensemble `go.mod`, `go.sum` et tout `vendor/`, notamment `vendor/modules.txt` et les licences, puis relancer la vérification de reproductibilité. Le vendoring natif inclut les paquets requis, pas les modules entiers ni les tests propres aux bibliothèques tierces.
+
+Une mise à jour du SDK doit être explicite dans la directive `go` de `go.mod` ; la CI lit cette même version. Mettre également à jour la version indiquée ici et revalider les builds.
 
 ## Utilisation
 
@@ -118,24 +156,39 @@ Lors d'une désinstallation avec l'installeur Inno Setup, Smart Desktop est arr�
 ## Tests
 
 ```powershell
-go vet .\...
-go test .\internal\... -count=1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
 ```
+
+La tâche VS Code **Test Smart Desktop** exécute ce script : `go vet` et tous les tests du module, avec la même politique vendor et la même version Go que le build.
 
 Tests d'intégration sur un bureau Windows interactif, **sans déplacement d'icône** et avec une fenêtre native de test masquée :
 
 ```powershell
-$env:SMART_DESKTOP_INTEGRATION = '1'
-go test .\internal\win32 .\internal\ui -run 'TestDesktopReadOnlyIntegration|TestNativeWindowSmoke|TestNativeAboutMenu' -v -count=1 -timeout=30s
-Remove-Item Env:\SMART_DESKTOP_INTEGRATION
+. .\scripts\go-vendor.ps1
+Invoke-VendoredGo {
+    $env:SMART_DESKTOP_INTEGRATION = '1'
+    try {
+        go test -mod=vendor .\internal\win32 .\internal\ui -run 'TestDesktopReadOnlyIntegration|TestNativeWindowSmoke|TestNativeAboutMenu' -v -count=1 -timeout=30s
+        if ($LASTEXITCODE -ne 0) { throw 'Integration tests failed.' }
+    } finally {
+        Remove-Item Env:\SMART_DESKTOP_INTEGRATION
+    }
+}
 ```
 
 Un test distinct déplace temporairement **une seule icône**, vérifie le déplacement puis la remise en place et l'absence de changement des autres positions et réglages, et conserve une sauvegarde de sécurité locale. Ne l'exécuter qu'avec l'accord de l'utilisateur du bureau. Il est ignoré si la réorganisation automatique est active ; il ne change pas les réglages. Avec la grille active, il choisit une destination libre en utilisant l'espacement du Shell, uniquement sur un écran principal à origine (0,0) ; sinon, si aucune destination sûre n'est disponible, il est ignoré sans déplacement :
 
 ```powershell
-$env:SMART_DESKTOP_ALLOW_MOVE = '1'
-go test .\internal\win32 -run TestDesktopRestoreConsentedIntegration -v -count=1 -timeout=30s
-Remove-Item Env:\SMART_DESKTOP_ALLOW_MOVE
+. .\scripts\go-vendor.ps1
+Invoke-VendoredGo {
+    $env:SMART_DESKTOP_ALLOW_MOVE = '1'
+    try {
+        go test -mod=vendor .\internal\win32 -run TestDesktopRestoreConsentedIntegration -v -count=1 -timeout=30s
+        if ($LASTEXITCODE -ne 0) { throw 'Restore integration test failed.' }
+    } finally {
+        Remove-Item Env:\SMART_DESKTOP_ALLOW_MOVE
+    }
+}
 ```
 
 Les tests unitaires couvrent les schemas, identités, tris, paramètres, écritures, fichiers corrompus, rétention, compatibilité multi-écrans, sauvegardes de sécurité, restaurations partielles et transitions simulées d'affichage. Ils couvrent aussi la matrice de restauration avec grille, la compatibilité des anciennes sauvegardes, la conservation de l'état de grille dans les archives, les erreurs de lecture des réglages et les changements observés pendant la capture ou les déplacements.
